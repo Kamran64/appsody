@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"strings"
 
 	//"math/rand"
 	"net/http"
@@ -78,8 +79,16 @@ type Template struct {
 	URL string `yaml:"url"`
 }
 
+var unsupportedRepos []string
 var (
-	appsodyHubURL = "https://raw.githubusercontent.com/appsody/stacks/master/index.yaml"
+	supportedIndexAPIVersion = "v2"
+)
+
+var (
+	appsodyHubURL = "https://github.com/appsody/stacks/releases/latest/download/incubator-index.yaml"
+)
+var (
+	experimentalRepositoryURL = "https://github.com/appsody/stacks/releases/latest/download/experimental-index.yaml"
 )
 
 // repoCmd represents the repo command
@@ -150,7 +159,10 @@ func ensureConfig() error {
 				URL:       appsodyHubURL,
 				IsDefault: true,
 			})
-
+			repo.Add(&RepositoryEntry{
+				Name: "experimental",
+				URL:  experimentalRepositoryURL,
+			})
 			Debug.log("Creating ", repoFileLocation)
 			if err := repo.WriteFile(repoFileLocation); err != nil {
 				return errors.Errorf("Error writing %s file: %s ", repoFileLocation, err)
@@ -283,6 +295,10 @@ func (r *RepositoryFile) listProjects() (string, error) {
 	if len(indices) != 0 {
 		var i int
 		for repoName, index := range indices {
+			if strings.Compare(index.APIVersion, supportedIndexAPIVersion) == 1 {
+				Debug.log("Adding unspported repoistory", repoName)
+				unsupportedRepos = append(unsupportedRepos, repoName)
+			}
 			//Info.log("\n", "Repository: ", repoName)
 			for id, value := range index.Projects {
 				stackArray[i][0] = repoName
@@ -301,7 +317,7 @@ func (r *RepositoryFile) listProjects() (string, error) {
 		var j int
 		for j = 0; j < len(sortedList); j++ {
 			if sortedList[j][1] != "" {
-				table.AddRow(sortedList[j][0], sortedList[j][1], sortedList[j][2], sortedList[j][3])
+				table.AddRow(sortedList[j][0], sortedList[j][1], sortedList[j][2], truncate(sortedList[j][3], 80))
 			}
 		}
 		return table.String(), nil
@@ -350,6 +366,14 @@ func sortStack(stackArray [50][50]string) (sortedArray [50][50]string) {
 	sortedArray = stackArray
 
 	return sortedArray
+}
+
+func truncate(s string, i int) string {
+	desc := s
+	if len(s) > i {
+		desc = s[0:i] + "..."
+	}
+	return desc
 }
 
 func sortRepo(stackArray [50][50]string) (sortedArray [50][50]string) {
@@ -513,6 +537,26 @@ func (r *RepositoryFile) Remove(name string) {
 			return
 		}
 	}
+}
+
+func (r *RepositoryFile) SetDefaultRepoName(name string, defaultRepoName string) (string, error) {
+	var repoName string
+	for index, rf := range r.Repositories {
+		//set current default repo to false
+		if rf.Name == defaultRepoName {
+			r.Repositories[index].IsDefault = false
+		}
+		//set new default repo
+		if rf.Name == name {
+			r.Repositories[index].IsDefault = true
+			repoName = rf.Name
+		}
+	}
+	if err := r.WriteFile(getRepoFileLocation()); err != nil {
+		return "", err
+	}
+	Info.log("Your default repository is now set to ", repoName)
+	return repoName, nil
 }
 
 func (r *RepositoryFile) WriteFile(path string) error {
